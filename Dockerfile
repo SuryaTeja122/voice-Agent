@@ -7,6 +7,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ libpq-dev curl \
     && rm -rf /var/lib/apt/lists/*
 
+Run pip install --upgrade pip setuptools
+
 COPY pyproject.toml .
 RUN pip install --no-cache-dir -e ".[dev]"
 
