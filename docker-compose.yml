@@ -1,0 +1,68 @@
+version: "3.9"
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: voice_agent
+      POSTGRES_USER: va
+      POSTGRES_PASSWORD: va_secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/migrations/001_initial.sql:/docker-entrypoint-initdb.d/001_initial.sql
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+
+  agent:
+    build: .
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers 4
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://va:va_secret@db/voice_agent
+      REDIS_URL: redis://redis:6379/0
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY}
+      AZURE_SPEECH_KEY: ${AZURE_SPEECH_KEY}
+      AZURE_SPEECH_REGION: centralindia
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER}
+      AGENT_BASE_URL: http://agent:8000
+    depends_on:
+      - db
+      - redis
+    deploy:
+      replicas: 2   # horizontal scale: stateless workers, shared Redis+DB
+
+  worker:
+    build: .
+    command: celery -A workers.celery_app worker --loglevel=info -Q campaigns,reminders -c 4
+    environment:
+      DATABASE_URL: postgresql+asyncpg://va:va_secret@db/voice_agent
+      REDIS_URL: redis://redis:6379/0
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER}
+      AGENT_BASE_URL: http://agent:8000
+    depends_on:
+      - db
+      - redis
+
+  beat:
+    build: .
+    command: celery -A workers.celery_app beat --loglevel=info
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - redis
+
+volumes:
+  pgdata:
